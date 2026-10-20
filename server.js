@@ -18,6 +18,7 @@ const players = new Map();
 
 wss.on("connection", (socket) => {
     const id = randomUUID();
+    let lastChatAt = 0;
 
     players.set(id, {
         id,
@@ -25,7 +26,9 @@ wss.on("connection", (socket) => {
         y: 0,
         grappleX: 0,
         grappleY: 0,
-        grappling: false
+        grappling: false,
+        name: "Anonymous",
+        color: "rgb(255, 0, 0)"
     });
 
     // Tell this player their unique ID
@@ -43,21 +46,62 @@ wss.on("connection", (socket) => {
             return;
         }
 
-        if (data.type !== "position") return;
-        if (!Number.isFinite(data.x) ||
-            !Number.isFinite(data.y) ||
-            !Number.isFinite(data.grappleX) ||
-            !Number.isFinite(data.grappleY) ||
-            typeof data.grappling !== "boolean") return;
+        if (data.type === "position") {
+            if (
+                !Number.isFinite(data.x) ||
+                !Number.isFinite(data.y) ||
+                !Number.isFinite(data.grappleX) ||
+                !Number.isFinite(data.grappleY) ||
+                typeof data.grappling !== "boolean"
+            ) return;
 
-        const player = players.get(id);
-        if (!player) return;
+            const player = players.get(id);
+            if (!player) return;
 
-        player.x = data.x;
-        player.y = data.y;
-        player.grappleX = data.grappleX;
-        player.grappleY = data.grappleY;
-        player.grappling = data.grappling;
+            player.x = data.x;
+            player.y = data.y;
+            player.grappleX = data.grappleX;
+            player.grappleY = data.grappleY;
+            player.grappling = data.grappling;
+        } else if (data.type === "initial") {
+            if (
+                typeof data.name !== "string" ||
+                data.name.length < 2 ||
+                data.name.length > 16 ||
+                typeof data.color !== "string"
+            ) return;
+
+            const player = players.get(id);
+            if (!player) return;
+
+            player.name = data.name;
+            player.color = data.color;
+        } else if (data.type === "chat") {
+            if (typeof data.message !== "string") return;
+
+            const message = data.message.trim();
+            if (message.length < 1 || message.length > 160) return;
+
+            const now = Date.now();
+            if (now - lastChatAt < 300) return;
+            lastChatAt = now;
+
+            const player = players.get(id);
+            if (!player) return;
+
+            const chatMessage = JSON.stringify({
+                type: "chat",
+                id,
+                name: player.name,
+                message
+            });
+
+            for (const client of wss.clients) {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(chatMessage);
+                }
+            }
+        }
     });
 
     socket.on("close", () => {
